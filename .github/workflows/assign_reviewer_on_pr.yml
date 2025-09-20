@@ -1,0 +1,47 @@
+name: Auto Assign Reviewer on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened]
+
+jobs:
+  assign-reviewer:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get list of reviewers
+      id: get_reviewers
+      run: |
+        reviewers=$(cat reviewers.txt | tr '\n' ' ')
+        echo "::set-output name=reviewers::$reviewers"
+
+    - name: Assign a random reviewer
+      uses: peter-evans/create-or-update-comment@v3
+      id: assign
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        body: |
+          Assigning a reviewer...
+    - name: Assign reviewer via GitHub API
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const reviewers = '${{ steps.get_reviewers.outputs.reviewers }}'.split(' ').filter(Boolean);
+          const prAuthor = context.payload.pull_request.user.login;
+          // Исключаем автора из списка ревьюеров
+          const possibleReviewers = reviewers.filter(r => r !== prAuthor);
+          if (possibleReviewers.length === 0) {
+            console.log("No reviewers available.");
+            return;
+          }
+          // Выбираем случайного ревьюера
+          const chosen = possibleReviewers[Math.floor(Math.random() * possibleReviewers.length)];
+          console.log(`Assigning reviewer: ${chosen}`);
+          await github.rest.pulls.requestReviewers({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.payload.pull_request.number,
+            reviewers: [chosen]
+          });

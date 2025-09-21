@@ -13,12 +13,6 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const issueBody = context.payload.issue.body || '';
-            const repoLinkRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)/;
-            const match = repoLinkRegex.exec(issueBody);
-            if (!match) {
-              return {repoFound: false};
-            }
             return {
               repoFound: true,
               owner: match[1],

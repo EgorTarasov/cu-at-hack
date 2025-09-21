@@ -46,39 +46,66 @@ jobs:
           script: |
             const targetOwner = '${{ steps.check_link.outputs.owner }}';
             const targetRepo = '${{ steps.check_link.outputs.repo }}';
-
-            // Проверка наличия ветки 'branch-with-feature'
-            const branches = await github.rest.repos.listBranches({
-              owner: targetOwner, 
-              repo: targetRepo
-            });
-            const branchExists = branches.data.some(b => b.name === 'branch-with-feature');
-
-            // Проверка закрытого PR из branch-with-feature в main
-            const pulls = await github.rest.pulls.list({
-              owner: targetOwner, 
-              repo: targetRepo, 
-              state: 'closed', 
-              base: 'main'
-            });
-            const prExists = pulls.data.some(pr => pr.head.ref === 'branch-with-feature');
-
+            
             const issue_number = context.payload.issue.number;
             const ownerOrg = context.repo.owner;
             const repoOrg = context.repo.repo;
-
-            let message = '';
-            if (branchExists && prExists) {
-              message = 'Проверка пройдена: ветка branch-with-feature существует и закрытый пулл реквест из неё в main есть.';
-            } else {
-              message = 'Проверка не пройдена:';
-              if (!branchExists) message += ' отсутствует ветка branch-with-feature.';
-              if (!prExists) message += ' отсутствует закрытый PR из branch-with-feature в main.';
+            
+            try {
+              // Проверка наличия ветки 'branch-with-feature'
+              let branchExists = false;
+              let branches;
+              try {
+                branches = await github.rest.repos.listBranches({
+                  owner: targetOwner,
+                  repo: targetRepo
+                });
+                branchExists = branches.data.some(b => b.name === 'branch-with-feature');
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createComment({
+                    owner: ownerOrg,
+                    repo: repoOrg,
+                    issue_number,
+                    body: `❌ Репозиторий https://github.com/${targetOwner}/${targetRepo} не найден или недоступен (приватный).`
+                  });
+                  return;
+                }
+                throw error;
+              }
+              
+              // Проверка закрытого PR из branch-with-feature в main
+              let prExists = false;
+              const pulls = await github.rest.pulls.list({
+                owner: targetOwner,
+                repo: targetRepo,
+                state: 'closed',
+                base: 'main'
+              });
+              prExists = pulls.data.some(pr => pr.head.ref === 'branch-with-feature');
+              
+              let message = '';
+              if (branchExists && prExists) {
+                message = '✅ Проверка пройдена: ветка `branch-with-feature` существует и закрытый пулл реквест из неё в `main` есть.';
+              } else {
+                message = '❌ Проверка не пройдена:\n';
+                if (!branchExists) message += '- Отсутствует ветка `branch-with-feature`\n';
+                if (!prExists) message += '- Отсутствует закрытый PR из `branch-with-feature` в `main`\n';
+              }
+              
+              await github.rest.issues.createComment({
+                owner: ownerOrg,
+                repo: repoOrg,
+                issue_number,
+                body: message
+              });
+              
+            } catch (error) {
+              console.error('Unexpected error:', error);
+              await github.rest.issues.createComment({
+                owner: ownerOrg,
+                repo: repoOrg,
+                issue_number,
+                body: `❌ Произошла ошибка при проверке репозитория: ${error.message}`
+              });
             }
-
-            await github.rest.issues.createComment({
-              owner: ownerOrg, 
-              repo: repoOrg, 
-              issue_number, 
-              body: message
-            });

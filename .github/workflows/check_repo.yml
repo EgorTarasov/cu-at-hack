@@ -1,0 +1,71 @@
+name: Peer Review Repo Check
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  check_repo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if issue body contains repo link
+        id: check_link
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueBody = context.payload.issue.body || '';
+            const repoLinkRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)/;
+            const match = repoLinkRegex.exec(issueBody);
+            if (!match) {
+              return {repoFound: false};
+            }
+            return {
+              repoFound: true,
+              owner: match[1],
+              repo: match[2]
+            };
+
+      - name: Comment "Check started"
+        if: steps.check_link.outputs.repoFound == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue_number = context.payload.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            await github.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: 'Начинаю проверку репозитория по ссылке из issue...'
+            });
+
+      - name: Check branch and PR
+        if: steps.check_link.outputs.repoFound == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { owner, repo } = steps.check_link.outputs;
+
+            // Проверка наличия ветки 'branch-with-feature'
+            const branches = await github.repos.listBranches({owner, repo});
+            const branchExists = branches.data.some(b => b.name === 'branch-with-feature');
+
+            // Проверка закрытого PR из branch-with-feature в main
+            const pulls = await github.pulls.list({owner, repo, state: 'closed', base: 'main'});
+            const prExists = pulls.data.some(pr => pr.head.ref === 'branch-with-feature');
+
+            const issue_number = context.payload.issue.number;
+            const ownerOrg = context.repo.owner;
+            const repoOrg = context.repo.repo;
+
+            let message = '';
+            if (branchExists && prExists) {
+              message = 'Проверка пройдена: ветка branch-with-feature существует и закрытый пулл реквест из неё в main есть.';
+            } else {
+              message = 'Проверка не пройдена:';
+              if (!branchExists) message += ' отсутствует ветка branch-with-feature.';
+              if (!prExists) message += ' отсутствует закрытый PR из branch-with-feature в main.';
+            }
+
+            await github.issues.createComment({owner: ownerOrg, repo: repoOrg, issue_number, body: message});

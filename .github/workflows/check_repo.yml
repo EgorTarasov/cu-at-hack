@@ -13,11 +13,16 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            return {
-              repoFound: true,
-              owner: match[1],
-              repo: match[2]
-            };
+            const issueBody = context.payload.issue.body || '';
+            const repoLinkRegex = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)/;
+            const match = repoLinkRegex.exec(issueBody);
+            if (!match) {
+              core.setOutput('repoFound', 'false');
+            } else {
+              core.setOutput('repoFound', 'true');
+              core.setOutput('owner', match[1]);
+              core.setOutput('repo', match[2]);
+            }
 
       - name: Comment "Check started"
         if: steps.check_link.outputs.repoFound == 'true'
@@ -27,7 +32,7 @@ jobs:
             const issue_number = context.payload.issue.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            await github.issues.createComment({
+            await github.rest.issues.createComment({
               owner,
               repo,
               issue_number,
@@ -39,14 +44,23 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const { owner, repo } = steps.check_link.outputs;
+            const targetOwner = '${{ steps.check_link.outputs.owner }}';
+            const targetRepo = '${{ steps.check_link.outputs.repo }}';
 
             // Проверка наличия ветки 'branch-with-feature'
-            const branches = await github.repos.listBranches({owner, repo});
+            const branches = await github.rest.repos.listBranches({
+              owner: targetOwner, 
+              repo: targetRepo
+            });
             const branchExists = branches.data.some(b => b.name === 'branch-with-feature');
 
             // Проверка закрытого PR из branch-with-feature в main
-            const pulls = await github.pulls.list({owner, repo, state: 'closed', base: 'main'});
+            const pulls = await github.rest.pulls.list({
+              owner: targetOwner, 
+              repo: targetRepo, 
+              state: 'closed', 
+              base: 'main'
+            });
             const prExists = pulls.data.some(pr => pr.head.ref === 'branch-with-feature');
 
             const issue_number = context.payload.issue.number;
@@ -62,4 +76,9 @@ jobs:
               if (!prExists) message += ' отсутствует закрытый PR из branch-with-feature в main.';
             }
 
-            await github.issues.createComment({owner: ownerOrg, repo: repoOrg, issue_number, body: message});
+            await github.rest.issues.createComment({
+              owner: ownerOrg, 
+              repo: repoOrg, 
+              issue_number, 
+              body: message
+            });
